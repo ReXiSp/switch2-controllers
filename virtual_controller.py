@@ -1,6 +1,8 @@
 import vgamepad
+import asyncio
+import threading
 
-from controller import Controller, ControllerInputData
+from controller import Controller, ControllerInputData, VibrationData
 from config import CONFIG
 
 class VirtualController:
@@ -9,6 +11,7 @@ class VirtualController:
     xb_controller: vgamepad.VX360Gamepad
     previous_buttons_left: int
     previous_buttons_right: int
+    next_vibration_event: asyncio.Event
 
     def __init__(self, player_number: int):
         self.player_number = player_number
@@ -16,6 +19,43 @@ class VirtualController:
         self.xb_controller = vgamepad.VX360Gamepad()
         self.previous_buttons_left = 0x00000000
         self.previous_buttons_right = 0x00000000
+        self.next_vibration_event = None
+
+        def vibration_callback(client, target, large_motor, small_motor, led_number, user_data):
+                print("Vibration : {}, {}".format(large_motor, small_motor))
+                vibrationData = VibrationData()
+                vibrationData.lf_amp = int(800 * large_motor / 256)
+                vibrationData.hf_amp = int(800 * small_motor / 256)
+
+                if self.next_vibration_event:
+                    # Notifify previous call to stop sending vibration commands
+                    self.next_vibration_event.set()
+                    self.next_vibration_event = None
+
+                next_event = asyncio.Event()
+                if large_motor == 0 and small_motor == 0:
+                    # No Need to send command repeatedly
+                    next_event.set()
+                else:
+                    self.next_vibration_event = next_event
+
+                async def send_vibration_task():
+                    while True:
+                        if len(self.controllers) == 1:
+                            await self.controllers[0].set_vibration(vibrationData)
+                        elif len(self.controllers) == 2:
+                            await asyncio.gather(self.controllers[0].set_vibration(vibrationData), self.controllers[1].set_vibration(vibrationData))
+                        await asyncio.sleep(0.02)
+                        if next_event.is_set():
+                            break
+
+                def run_async_loop_in_thread():
+                    asyncio.run(send_vibration_task())
+
+                t = threading.Thread(target=run_async_loop_in_thread)
+                t.start()
+
+        self.xb_controller.register_notification(callback_function=vibration_callback)
 
     def __repr__(self):
         return f"Player {self.player_number} {self.controllers}"

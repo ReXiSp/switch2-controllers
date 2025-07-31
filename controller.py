@@ -253,7 +253,7 @@ class Controller:
         
         self.client = BleakClient(self.device, disconnected_callback=disconnected_callback)
         await self.client.connect()
-        logger.info(f"Connected to {self.device.address}")
+        logger.debug(f"Connected to {self.device.address}")
 
         # Reduce connection interval
         from bleak.backends.winrt.client import BleakClientWinRT
@@ -272,7 +272,7 @@ class Controller:
         # Read controller info and stick calibration
         self.controller_info = await self.read_controller_info()
         self.stick_calibration, self.second_stick_calibration = await self.read_calibration_data()
-        logger.info(f"Succesfully initialized {self.device.address} : {self.controller_info}")
+        logger.debug(f"Succesfully initialized {self.device.address} : {self.controller_info}")
 
     @classmethod
     async def create_from_device(cls, device: BLEDevice):
@@ -292,6 +292,7 @@ class Controller:
     ### Set vibration ###
     async def set_vibration(self, vibration: VibrationData):
         """Set vibration data"""
+        logger.info("Sending vibration")
         if self.is_joycon_left():
             await self.client.write_gatt_char(VIBRATION_WRITE_JOYCON_L_UUID, (b'\x00' + (0x50 + (self.vibration_packet_id & 0x0F)).to_bytes() + vibration.get_bytes()).ljust(17, b'\0'))
         elif self.is_joycon_right():
@@ -304,13 +305,13 @@ class Controller:
     async def write_command(self, command_id: int, subcommand_id: int, command_data = b''):
         """Generic write command method"""
         command_buffer = command_id.to_bytes() + b"\x91\x01" + subcommand_id.to_bytes() + b"\x00" + len(command_data).to_bytes() + b"\x00\x00" + command_data
-        logger.info(f"Req {to_hex(command_buffer)}")
+        logger.debug(f"Req {to_hex(command_buffer)}")
 
         self.response_future = asyncio.get_running_loop().create_future()
         
         await self.client.write_gatt_char(COMMAND_WRITE_UUID, command_buffer)
         response_buffer = await self.response_future
-        logger.info(f"Resp {to_hex(response_buffer)}")
+        logger.debug(f"Resp {to_hex(response_buffer)}")
         if len(response_buffer) < 8 or response_buffer[0] != command_id or response_buffer[1] != 0x01:
             raise Exception(f"Unexpected response : {response_buffer}")
 

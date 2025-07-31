@@ -83,7 +83,6 @@ async def run():
                         await add_controller(device, True)
 
         async with BleakScanner(callback) as scanner:
-            vibrationData = VibrationData()
             await stop_event.wait()
     finally:
         for vc in virtual_controllers:
