@@ -3,7 +3,7 @@ import asyncio
 import threading
 
 from controller import Controller, ControllerInputData, VibrationData
-from config import CONFIG
+from config import CONFIG, ButtonConfig
 import logging
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ class VirtualController:
 
                 async def send_vibration_task():
                     while True:
-                        if len(self.controllers) == 1:
+                        if self.is_single():
                             await self.controllers[0].set_vibration(vibrationData)
                         elif len(self.controllers) == 2:
                             await asyncio.gather(self.controllers[0].set_vibration(vibrationData), self.controllers[1].set_vibration(vibrationData))
@@ -82,24 +82,37 @@ class VirtualController:
         await controller.set_leds(self.player_number)
 
         def input_report_callback(inputData: ControllerInputData, controller: Controller):
-            # In case of 2 joycons, we need to merge the left and right buttons input
             buttons = inputData.buttons
-            if len(self.controllers) == 2:
+
+            if not self.is_single():
+                buttonsConfig = CONFIG.dual_joycons_config
+                # In case of 2 joycons, we need to merge the left and right buttons input
                 if controller.is_joycon_left():
                     buttons |= self.previous_buttons_right
                     self.previous_buttons_left = inputData.buttons
                 elif controller.is_joycon_right():
                     buttons |= self.previous_buttons_left
                     self.previous_buttons_right = inputData.buttons
+            elif controller.is_joycon_left():
+                buttonsConfig = CONFIG.single_joycon_l_config
+            elif controller.is_joycon_right():
+                buttonsConfig = CONFIG.single_joycon_r_config
+            else:
+                buttonsConfig = CONFIG.procon_config
 
-            self.xb_controller.report.wButtons, left_trigger, right_trigger = CONFIG.convert_buttons(buttons)
+            self.xb_controller.report.wButtons, left_trigger, right_trigger = buttonsConfig.convert_buttons(buttons)
             self.xb_controller.left_trigger(255 if left_trigger else 0)
             self.xb_controller.right_trigger(255 if right_trigger else 0)
-            if not controller.is_joycon_left():
-                self.xb_controller.right_joystick_float(inputData.right_stick[0], inputData.right_stick[1])
-            
-            if not controller.is_joycon_right():
-                self.xb_controller.left_joystick_float(inputData.left_stick[0], inputData.left_stick[1])
+
+            if controller.is_joycon_right() and self.is_single():
+                self.xb_controller.left_joystick_float(inputData.right_stick[1], -inputData.right_stick[0])
+            elif controller.is_joycon_left() and self.is_single():
+                self.xb_controller.left_joystick_float(-inputData.left_stick[1], inputData.left_stick[0])
+            else:
+                if not controller.is_joycon_left(): # dual stick or joycon right (dual)
+                    self.xb_controller.right_joystick_float(inputData.right_stick[0], inputData.right_stick[1])
+                if not controller.is_joycon_right(): # dual stick or joycon left (dual)
+                    self.xb_controller.left_joystick_float(inputData.left_stick[0], inputData.left_stick[1])
 
             self.xb_controller.update()
 
@@ -117,7 +130,10 @@ class VirtualController:
                 return True
 
     def is_single_joycon_right(self):
-        return len(self.controllers) == 1 and self.controllers[0].is_joycon_right()
+        return self.is_single() and self.controllers[0].is_joycon_right()
 
     def is_single_joycon_left(self):
-        return len(self.controllers) == 1 and self.controllers[0].is_joycon_left()
+        return self.is_single() and self.controllers[0].is_joycon_left()
+    
+    def is_single(self):
+        return len(self.controllers) == 1

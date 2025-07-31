@@ -1,9 +1,36 @@
 from dataclasses import dataclass
 import yaml
-from controller import ControllerInputData
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+SWITCH_BUTTONS = {
+    "Y":     0x00000001,
+    "X":     0x00000002,
+    "B":     0x00000004,
+    "A":     0x00000008,
+    "SR_R":  0x00000010,
+    "SL_R":  0x00000020,
+    "R":     0x00000040,
+    "ZR":    0x00000080,
+    "MINUS": 0x00000100,
+    "PLUS":  0x00000200,
+    "R_STK": 0x00000400,
+    "L_STK": 0x00000800,
+    "HOME":  0x00001000,
+    "CAPT":  0x00002000,
+    "C":     0x00004000,
+    # unused 0x00008000,
+    "DOWN":  0x00010000,
+    "UP":    0x00020000,
+    "RIGHT": 0x00040000,
+    "LEFT":  0x00080000,
+    "SR_L":  0x00100000,
+    "SL_L":  0x00200000,
+    "L":     0x00400000,
+    "ZL":    0x00800000,
+}
 
 XB_BUTTONS = {
     "UP": 0x0001,
@@ -24,40 +51,32 @@ XB_BUTTONS = {
 }
 
 @dataclass
-class Config:
-    combine_joycons: bool
+class ButtonConfig:
     buttons: dict[int, int]
     left_trigger: list[int]
     right_trigger: list[int]
 
-    def __init__(self, config_file_path: str):
+    def __init__(self, buttons_dict: dict[str, str]):
         self.buttons = {}
         self.left_trigger = []
         self.right_trigger = []
 
-        with open(config_file_path) as cf:
-            config = yaml.safe_load(cf)
+        for k, v in buttons_dict.items():
+            if k not in SWITCH_BUTTONS:
+                raise Exception(f"Unknown switch button name in config: {k}")
+            
+            switch_button = SWITCH_BUTTONS[k]
+            if v is not None:
+                if v == "LT":
+                    self.left_trigger.append(switch_button)
+                elif v == "RT":
+                    self.right_trigger.append(switch_button)
+                else:
+                    if v not in XB_BUTTONS:
+                        raise Exception(f"Unknown XB button name in config: {v}")
+                    xb_button = XB_BUTTONS[v]
 
-            self.combine_joycons = config["combine_joycons"]
-
-            for k, v in config["buttons"].items():
-                if k not in ControllerInputData.BUTTONS:
-                    raise Exception(f"Unknown switch button name in config: {k}")
-                
-                switch_button = ControllerInputData.BUTTONS[k]
-                if v is not None:
-                    if v == "LT":
-                        self.left_trigger.append(switch_button)
-                    elif v == "RT":
-                        self.right_trigger.append(switch_button)
-                    else:
-                        if v not in XB_BUTTONS:
-                            raise Exception(f"Unknown XB button name in config: {v}")
-                        xb_button = XB_BUTTONS[v]
-
-                        self.buttons[switch_button] = xb_button
-        
-        logger.debug(f"Config successfully read {self}")
+                    self.buttons[switch_button] = xb_button
 
     def convert_buttons(self, switch_buttons: int):
         xb_buttons = 0x0000
@@ -69,5 +88,64 @@ class Config:
         right_trigger = any([b & switch_buttons for b in self.right_trigger])
 
         return xb_buttons, left_trigger, right_trigger
+
+@dataclass
+class MouseButtonConfig:
+    left_button: int
+    middle_button: int
+    right_button: int
+
+    def __init__(self, buttons_dict: dict[str, str]):
+        self.left_button = SWITCH_BUTTONS[buttons_dict["left_button"]]
+        self.middle_button = SWITCH_BUTTONS[buttons_dict["middle_button"]]
+        self.right_button = SWITCH_BUTTONS[buttons_dict["right_button"]]
+
+@dataclass
+class MouseConfig:
+    enabled: bool
+    sensitivity: float
+    scroll_sensitivity: float
+    joycon_l_buttons: MouseButtonConfig
+    joycon_r_buttons: MouseButtonConfig
+
+    def __init__(self, config_dict: dict[str, str]):
+        self.enabled = config_dict["enabled"]
+        self.sensitivity = config_dict["sensitivity"]
+        self.scroll_sensitivity = config_dict["scroll_sensitivity"]
+        buttons_config = config_dict["buttons"]
+        self.joycon_l_buttons = MouseButtonConfig(buttons_config["left_joycon"])
+        self.joycon_r_buttons = MouseButtonConfig(buttons_config["right_joycon"])
+
+
+@dataclass
+class Config:
+    combine_joycons: bool
+    deadzone: int
+    dual_joycons_config: ButtonConfig
+    single_joycon_l_config: ButtonConfig
+    single_joycon_r_config: ButtonConfig
+    procon_config: ButtonConfig
+    mouse_config: MouseConfig
+
+    def __init__(self, config_file_path: str):
+
+        with open(config_file_path) as cf:
+            config = yaml.safe_load(cf)
+
+            self.combine_joycons = config["combine_joycons"]
+            self.deadzone = config["deadzone"]
+
+            buttons_config = config["buttons"]
+
+            self.dual_joycons_config = ButtonConfig(buttons_config["dual_joycons"])
+            self.single_joycon_l_config = ButtonConfig(buttons_config["single_joycon_l"])
+            self.single_joycon_r_config = ButtonConfig(buttons_config["single_joycon_r"])
+            self.procon_config = ButtonConfig(buttons_config["procon"])
+
+            self.mouse_config = MouseConfig(config["mouse"])
+
+        logger.info(f"Config successfully read {self}")
+
+
     
 CONFIG = Config("config.yaml")

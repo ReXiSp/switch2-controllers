@@ -3,8 +3,11 @@ from bleak.backends.device import BLEDevice
 import asyncio
 import logging
 import bluetooth
+import win32api
+import win32con
 from dataclasses import dataclass
-from utils import apply_calibration_to_axis, get_stick_xy, to_hex, decodeu, decodes, convert_mac_string_to_value
+from config import CONFIG, SWITCH_BUTTONS
+from utils import apply_calibration_to_axis, get_stick_xy, press_or_release_mouse_button, signed_looping_difference_16bit, to_hex, decodeu, decodes, convert_mac_string_to_value
 
 logging.basicConfig()
 logging.getLogger().setLevel(logging.INFO)
@@ -77,6 +80,14 @@ LED_PATTERN = {
 ### Dataclasses
 
 @dataclass
+class MouseState:
+    x: int
+    y: int
+    lb: bool
+    mb: bool 
+    rb: bool
+
+@dataclass
 class StickCalibrationData:
     center: tuple[int, int]
     max: tuple[int, int]
@@ -136,38 +147,11 @@ class ControllerInputData:
         if right_stick_calibration:
             self.right_stick = right_stick_calibration.apply_calibration(self.right_stick)
 
-    BUTTONS = {
-        "Y":     0x00000001,
-        "X":     0x00000002,
-        "B":     0x00000004,
-        "A":     0x00000008,
-        "SR_R":  0x00000010,
-        "SL_R":  0x00000020,
-        "R":     0x00000040,
-        "ZR":    0x00000080,
-        "MINUS": 0x00000100,
-        "PLUS":  0x00000200,
-        "R_STK": 0x00000400,
-        "L_STK": 0x00000800,
-        "HOME":  0x00001000,
-        "CAPT":  0x00002000,
-        "C":     0x00004000,
-        # unused 0x00008000,
-        "DOWN":  0x00010000,
-        "UP":    0x00020000,
-        "RIGHT": 0x00040000,
-        "LEFT":  0x00080000,
-        "SR_L":  0x00100000,
-        "SL_L":  0x00200000,
-        "L":     0x00400000,
-        "ZL":    0x00800000,
-    }
-
     def __str__(self):
         return f"""raw data : {to_hex(self.raw_data)}
 time: {self.time}             
 buttons_raw: {to_hex(self.buttons.to_bytes(length=4))}   
-buttons: {", ".join([k for k,v in self.BUTTONS.items() if v & self.buttons])}                                                             
+buttons: {", ".join([k for k,v in SWITCH_BUTTONS.items() if v & self.buttons])}                                                             
 left_stick: {'{0: <5}'.format(self.left_stick[0])}, {'{0: <5}'.format(self.left_stick[1])}          
 right_stick: {'{0: <5}'.format(self.right_stick[0])}, {'{0: <5}'.format(self.right_stick[1])}             
 mouse (x,y,rugosity,distance): {'{0: <5}'.format(self.mouse_coords[0])}, {'{0: <5}'.format(self.mouse_coords[1])}, {'{0: <5}'.format(self.mouse_roughness)}, {'{0: <5}'.format(self.mouse_distance)}               
@@ -236,6 +220,7 @@ class Controller:
         self.disconnected_callback = None
         self.left_stick_calibration: StickCalibrationData = None
         self.right_stick_calibration: StickCalibrationData = None
+        self.previous_mouse_state: MouseState = None
 
         self.response_future = None
         self.vibration_packet_id = 0
@@ -272,6 +257,10 @@ class Controller:
         # Read controller info and stick calibration
         self.controller_info = await self.read_controller_info()
         self.stick_calibration, self.second_stick_calibration = await self.read_calibration_data()
+
+        if CONFIG.mouse_config.enabled:
+            await self.enableFeatures(FEATURE_MOUSE)
+
         logger.debug(f"Succesfully initialized {self.device.address} : {self.controller_info}")
 
     @classmethod
@@ -384,11 +373,60 @@ class Controller:
         if self.input_report_callback is None:
             # Enable notifiy if not done already
             def input_report_callback(sender, data):
+                inputData = ControllerInputData(data, self.stick_calibration, self.second_stick_calibration)
+
+                self.simulate_mouse(inputData)
+
                 if self.input_report_callback is not None:
-                    self.input_report_callback(ControllerInputData(data, self.stick_calibration, self.second_stick_calibration), self)
+                    self.input_report_callback(inputData, self)
+
             await self.client.start_notify(INPUT_REPORT_UUID, input_report_callback)
 
         self.input_report_callback = callback
+
+    def simulate_mouse(self, inputData: ControllerInputData):
+        mouse_config = CONFIG.mouse_config
+        if mouse_config.enabled and self.is_joycon():
+            # Check if joycon is being used as a mouse
+            if inputData.mouse_distance < 1000 and inputData.mouse_roughness < 4000:
+                x, y = inputData.mouse_coords
+                mouseButtonsConfig = mouse_config.joycon_l_buttons if self.is_joycon_left() else mouse_config.joycon_r_buttons
+                lb = inputData.buttons & mouseButtonsConfig.left_button
+                mb = inputData.buttons & mouseButtonsConfig.middle_button
+                rb = inputData.buttons & mouseButtonsConfig.right_button
+
+                # prevent buttons used by mouse from being sent to virtual controller
+                inputData.buttons &= ~(mouseButtonsConfig.left_button | mouseButtonsConfig.middle_button | mouseButtonsConfig.right_button)
+
+                if self.previous_mouse_state is not None:
+                    dx = signed_looping_difference_16bit(self.previous_mouse_state.x, x)
+                    dy = signed_looping_difference_16bit(self.previous_mouse_state.y ,y)
+
+                    mx, my = win32api.GetCursorPos()
+                    if (dx != 0 or dy != 0):
+                        mx += int(dx * mouse_config.sensitivity)
+                        my += int(dy * mouse_config.sensitivity)
+                        win32api.SetCursorPos((mx, my))
+
+                    press_or_release_mouse_button(lb, self.previous_mouse_state.lb, win32con.MOUSEEVENTF_LEFTDOWN, mx, my)
+                    press_or_release_mouse_button(mb, self.previous_mouse_state.mb, win32con.MOUSEEVENTF_MIDDLEDOWN, mx, my)
+                    press_or_release_mouse_button(rb, self.previous_mouse_state.rb, win32con.MOUSEEVENTF_RIGHTDOWN, mx, my)
+
+                    if self.is_joycon_right():
+                        scroll_value = inputData.right_stick[1]
+                        # inhibit stick from being sent to virtual controller
+                        inputData.right_stick = 0,0
+                    else:
+                        scroll_value = inputData.left_stick[1]
+                        # inhibit stick from being sent to virtual controller
+                        inputData.left_stick = 0,0
+
+                    if abs(scroll_value) > 0.2:
+                        win32api.mouse_event(win32con.MOUSEEVENTF_WHEEL, 0, 0, int(scroll_value * 60 * mouse_config.scroll_sensitivity), 0)
+                        
+                self.previous_mouse_state = MouseState(x, y, lb, mb, rb)
+            else:
+                self.previous_mouse_state = None
 
     ### Controller info
 
@@ -397,6 +435,9 @@ class Controller:
 
     def is_joycon_left(self):
         return self.controller_info.product_id == JOYCON2_LEFT_PID
+    
+    def is_joycon(self):
+        return self.is_joycon_left() or self.is_joycon_right()
 
     def has_second_stick(self):
         return self.controller_info.product_id in [PRO_CONTROLLER2_PID, NSO_GAMECUBE_CONTROLLER_PID]

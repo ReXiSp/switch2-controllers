@@ -1,4 +1,6 @@
-DEADZONE = 50
+import win32api
+
+from config import CONFIG
 
 def to_hex(buffer):
     return " ".join("{:02x}".format(x) for x in buffer)
@@ -26,8 +28,14 @@ def signed_looping_difference_16bit(a, b):
 
 def apply_calibration_to_axis(raw_value, center, max_abs, min_abs):
     signed_value = raw_value - center
-    if signed_value > DEADZONE:
+    if signed_value > CONFIG.deadzone:
         return min(signed_value / max_abs, 1)
-    if signed_value < -DEADZONE:
+    if signed_value < -CONFIG.deadzone:
         return -min(-signed_value / min_abs, 1)
     return 0
+
+def press_or_release_mouse_button(state: bool, prev_state: bool, button: int, mouse_x: int, mouse_y):
+    if (state and not prev_state):
+        win32api.mouse_event(button, mouse_x, mouse_y, 0, 0)
+    if (not state and prev_state):
+        win32api.mouse_event(button << 1, mouse_x, mouse_y, 0, 0)

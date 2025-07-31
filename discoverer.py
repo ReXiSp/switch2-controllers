@@ -13,6 +13,8 @@ from controller import Controller, ControllerInputData, NINTENDO_VENDOR_ID, CONT
 from virtual_controller import VirtualController
 from config import CONFIG
 
+logger = logging.getLogger(__name__)
+
 NINTENDO_BLUETOOTH_MANUFACTURER_ID = 0x0553
 
 class Discoverer:
@@ -27,24 +29,24 @@ async def run():
         virtual_controllers: list[VirtualController] = []
 
         def disconnected_controller(controller: Controller):
-            print(f"Controller disconected {controller.client.address}")
+            logger.info(f"Controller disconected {controller.client.address}")
             connected_mac_addresses.remove(controller.client.address)
             for vc in virtual_controllers[:]:
                 if vc.remove_controller(controller):
                     virtual_controllers.remove(vc)
                     
-            print(virtual_controllers)
+            logger.info(virtual_controllers)
 
         lock = asyncio.Lock()
 
         async def add_controller(device: BLEDevice, paired: bool):
             try:
                 controller = await Controller.create_from_device(device)
-                print(f"Connected to {device.address}")
+                logger.info(f"Connected to {device.address}")
                 controller.disconnected_callback = disconnected_controller
                 if not paired:
                     await controller.pair()
-                    print(f"Paired successfully to {device.address}")
+                    logger.info(f"Paired successfully to {device.address}")
 
                 virtual_controller = None
                 await lock.acquire()
@@ -66,9 +68,10 @@ async def run():
                 
                 await virtual_controller.init_added_controller(controller)
 
-                print(virtual_controllers)
+                logger.info(virtual_controllers)
             except BleakError:
                 logging.exception(f"Unable to initialize device {device.address}")
+                connected_mac_addresses.remove(device.address)
 
         async def callback(device: BLEDevice, advertising_data: AdvertisementData):
             if device.address in connected_mac_addresses:
@@ -81,11 +84,11 @@ async def run():
                 if vendor_id == NINTENDO_VENDOR_ID and product_id in CONTROLER_NAMES:
                     logging.debug(f"Manufacturer data: {to_hex(nintendo_manufacturer_data)}")
                     if reconnect_mac == 0:
-                        print(f"Found pairing device {CONTROLER_NAMES[product_id]} {device.address}")
+                        logging.info(f"Found pairing device {CONTROLER_NAMES[product_id]} {device.address}")
                         connected_mac_addresses.append(device.address)
                         await add_controller(device, False)
                     elif reconnect_mac == host_mac_value:
-                        print(f"Found already paired device {CONTROLER_NAMES[product_id]} {device.address}")
+                        logging.info(f"Found already paired device {CONTROLER_NAMES[product_id]} {device.address}")
                         connected_mac_addresses.append(device.address)
                         await add_controller(device, True)
 
