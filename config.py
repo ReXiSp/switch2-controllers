@@ -57,7 +57,7 @@ class Config:
 
                         self.buttons[switch_button] = xb_button
         
-        logger.info(f"Config successfully read {self}")
+        logger.debug(f"Config successfully read {self}")
 
     def convert_buttons(self, switch_buttons: int):
         xb_buttons = 0x0000

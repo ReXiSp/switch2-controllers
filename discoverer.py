@@ -35,6 +35,8 @@ async def run():
                     
             print(virtual_controllers)
 
+        lock = asyncio.Lock()
+
         async def add_controller(device: BLEDevice, paired: bool):
             try:
                 controller = await Controller.create_from_device(device)
@@ -45,19 +47,24 @@ async def run():
                     print(f"Paired successfully to {device.address}")
 
                 virtual_controller = None
-                
-                if CONFIG.combine_joycons:
-                    # try to find an already connected joycon to combine with
-                    if controller.is_joycon_left():
-                        virtual_controller = next(filter(lambda vc: vc.is_single_joycon_right(), virtual_controllers), None)
-                    elif controller.is_joycon_right():
-                        virtual_controller = next(filter(lambda vc: vc.is_single_joycon_left(), virtual_controllers), None)
+                await lock.acquire()
+                try:
+                    if CONFIG.combine_joycons:
+                        # try to find an already connected joycon to combine with
+                        if controller.is_joycon_left():
+                            virtual_controller = next(filter(lambda vc: vc.is_single_joycon_right(), virtual_controllers), None)
+                        elif controller.is_joycon_right():
+                            virtual_controller = next(filter(lambda vc: vc.is_single_joycon_left(), virtual_controllers), None)
 
-                if virtual_controller is None:
-                    virtual_controller = VirtualController(len(virtual_controllers) + 1)
-                    virtual_controllers.append(virtual_controller)
+                    if virtual_controller is None:
+                        virtual_controller = VirtualController(len(virtual_controllers) + 1)
+                        virtual_controllers.append(virtual_controller)
+                    
+                    virtual_controller.add_controller(controller)
+                finally:
+                    lock.release()
                 
-                await virtual_controller.add_controller(controller)
+                await virtual_controller.init_added_controller(controller)
 
                 print(virtual_controllers)
             except BleakError:
@@ -72,7 +79,7 @@ async def run():
                 product_id = decodeu(nintendo_manufacturer_data[5:7])
                 reconnect_mac = decodeu(nintendo_manufacturer_data[10:16])
                 if vendor_id == NINTENDO_VENDOR_ID and product_id in CONTROLER_NAMES:
-                    print(f"Manufacturer data: {to_hex(nintendo_manufacturer_data)}")
+                    logging.debug(f"Manufacturer data: {to_hex(nintendo_manufacturer_data)}")
                     if reconnect_mac == 0:
                         print(f"Found pairing device {CONTROLER_NAMES[product_id]} {device.address}")
                         connected_mac_addresses.append(device.address)
@@ -83,6 +90,7 @@ async def run():
                         await add_controller(device, True)
 
         async with BleakScanner(callback) as scanner:
+            print("Presss a button on a paired controller, or hold sync button on an unpaired controller")
             await stop_event.wait()
     finally:
         for vc in virtual_controllers:

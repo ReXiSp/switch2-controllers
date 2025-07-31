@@ -292,7 +292,7 @@ class Controller:
     ### Set vibration ###
     async def set_vibration(self, vibration: VibrationData):
         """Set vibration data"""
-        logger.info("Sending vibration")
+        logger.debug("Sending vibration")
         if self.is_joycon_left():
             await self.client.write_gatt_char(VIBRATION_WRITE_JOYCON_L_UUID, (b'\x00' + (0x50 + (self.vibration_packet_id & 0x0F)).to_bytes() + vibration.get_bytes()).ljust(17, b'\0'))
         elif self.is_joycon_right():
@@ -349,12 +349,12 @@ class Controller:
         """Returns a tuple with calibration data of left and right stick (if present)"""
         calibration_data_1 = await self.read_memory(0x0b, CALIBRATION_USER_JOYSTICK_1)
         if (decodeu(calibration_data_1[:3]) == 0xFFFFFF):
-            logger.info("no user calib for stick 1")
+            logger.debug("no user calib for stick 1")
             calibration_data_1 = await self.read_memory(0x0b, CALIBRATION_JOYSTICK_1)
         calibration_data_2 = await self.read_memory(0x0b, CALIBRATION_USER_JOYSTICK_2)
         if (decodeu(calibration_data_2[:3]) == 0xFFFFFF):
             calibration_data_2 = await self.read_memory(0x0b, CALIBRATION_JOYSTICK_2)
-            logger.info("no user calib for stick 2")
+            logger.debug("no user calib for stick 2")
         # when joycon, the stick calibration is store in first slot
         if self.is_joycon_left():
             return StickCalibrationData(calibration_data_1), None

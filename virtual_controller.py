@@ -4,6 +4,9 @@ import threading
 
 from controller import Controller, ControllerInputData, VibrationData
 from config import CONFIG
+import logging
+
+logger = logging.getLogger(__name__)
 
 class VirtualController:
     player_number: int
@@ -22,7 +25,7 @@ class VirtualController:
         self.next_vibration_event = None
 
         def vibration_callback(client, target, large_motor, small_motor, led_number, user_data):
-                print("Vibration : {}, {}".format(large_motor, small_motor))
+                logger.debug("Vibration : {}, {}".format(large_motor, small_motor))
                 vibrationData = VibrationData()
                 vibrationData.lf_amp = int(800 * large_motor / 256)
                 vibrationData.hf_amp = int(800 * small_motor / 256)
@@ -59,8 +62,8 @@ class VirtualController:
 
     def __repr__(self):
         return f"Player {self.player_number} {self.controllers}"
-
-    async def add_controller(self, controller: Controller):
+    
+    def add_controller(self, controller: Controller):
         if len(self.controllers) > 1:
             raise Exception("Cannot add more than 2 controller on a virtual controller")
         
@@ -70,6 +73,11 @@ class VirtualController:
             if not (existing_controller.is_joycon_left() and controller.is_joycon_right() or
                     existing_controller.is_joycon_right() and controller.is_joycon_left):
                 raise Exception("Can only combine left and right joycons")
+            
+        self.controllers.append(controller)
+
+    async def init_added_controller(self, controller: Controller):
+        """This async method needs to be called after calling add_controller"""
         
         await controller.set_leds(self.player_number)
 
@@ -97,7 +105,6 @@ class VirtualController:
 
         await controller.set_input_report_callback(input_report_callback)
 
-        self.controllers.append(controller)
 
     def remove_controller(self, controller: Controller):
         """Returns True if this was the last controller
