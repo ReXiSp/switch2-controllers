@@ -1,0 +1,25 @@
+combine_joycons: true
+buttons:
+  Y: X
+  X: Y
+  B: A
+  A: B
+  SR_R:
+  SL_R:
+  R: RB
+  ZR: RT
+  MINUS: BACK
+  PLUS: START
+  R_STK: R_STK
+  L_STK: L_STK
+  HOME: GUIDE
+  CAPT:
+  C:
+  DOWN: DOWN
+  UP: UP
+  RIGHT: RIGHT
+  LEFT: LEFT
+  SR_L:
+  SL_L:
+  L: LB
+  ZL: LT
