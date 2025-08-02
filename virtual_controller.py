@@ -80,7 +80,7 @@ class VirtualController:
     async def init_added_controller(self, controller: Controller):
         """This async method needs to be called after calling add_controller"""
         
-        await controller.set_leds(self.player_number)
+        await self.update_leds()
 
         def input_report_callback(inputData: ControllerInputData, controller: Controller):
             buttons = inputData.buttons
@@ -120,11 +120,17 @@ class VirtualController:
         controller.set_input_report_callback(input_report_callback)
 
 
-    def remove_controller(self, controller: Controller):
+    async def update_leds(self):
+        for controller in self.controllers:
+            await controller.set_leds(self.player_number, reversed=self.is_single_joycon_right())
+
+    async def remove_controller(self, controller: Controller):
         """Returns True if this was the last controller
         """
         if controller in self.controllers:
             self.controllers.remove(controller)
+
+            await self.update_leds()
 
             if len(self.controllers) == 0:
                 del self.xb_controller

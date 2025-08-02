@@ -7,7 +7,7 @@ import win32api
 import win32con
 from dataclasses import dataclass
 from config import CONFIG, SWITCH_BUTTONS
-from utils import apply_calibration_to_axis, get_stick_xy, press_or_release_mouse_button, signed_looping_difference_16bit, to_hex, decodeu, decodes, convert_mac_string_to_value
+from utils import apply_calibration_to_axis, get_stick_xy, press_or_release_mouse_button, reverse_bits, signed_looping_difference_16bit, to_hex, decodeu, decodes, convert_mac_string_to_value
 
 logging.basicConfig()
 logging.getLogger().setLevel(logging.INFO)
@@ -235,7 +235,7 @@ class Controller:
         
         def disconnected_callback(client: BleakClient):
             if (self.disconnected_callback is not None):
-                self.disconnected_callback(self)
+                asyncio.create_task(self.disconnected_callback(self))
         
         self.client = BleakClient(self.device, disconnected_callback=disconnected_callback)
         await self.client.connect()
@@ -310,13 +310,17 @@ class Controller:
 
         return response_buffer[8:]
     
-    async def set_leds(self, player_number: int):
+    async def set_leds(self, player_number: int, reversed=False):
         """Set the player indicator led to the specified <player_number>"""
         if player_number > 8:
             player_number = 8
 
+        value = LED_PATTERN[player_number]
+        if reversed:
+            value = reverse_bits(value, 4)
+            
         # crash if less than 4 bytes of data, even though only one byte seems significant
-        data = LED_PATTERN[player_number].to_bytes().ljust(4, b'\0')
+        data = value.to_bytes().ljust(4, b'\0')
         await self.write_command(COMMAND_LEDS, SUBCOMMAND_LEDS_SET_PLAYER, data)
 
     async def play_vibration_preset(self, preset_id: int):

@@ -39,3 +39,11 @@ def press_or_release_mouse_button(state: bool, prev_state: bool, button: int, mo
         win32api.mouse_event(button, mouse_x, mouse_y, 0, 0)
     if (not state and prev_state):
         win32api.mouse_event(button << 1, mouse_x, mouse_y, 0, 0)
+
+def reverse_bits(n: int, no_of_bits: int):
+    result = 0
+    for i in range(no_of_bits):
+        result <<= 1
+        result |= n & 1
+        n >>= 1
+    return result

@@ -24,11 +24,11 @@ async def run_discovery(update_controllers_threadsafe, quit_event):
         connected_mac_addresses: list[str] = []
         virtual_controllers: list[VirtualController] = [None] * 8
 
-        def disconnected_controller(controller: Controller):
+        async def disconnected_controller(controller: Controller):
             logger.info(f"Controller disconected {controller.client.address}")
             connected_mac_addresses.remove(controller.client.address)
             for i, vc in enumerate(virtual_controllers[:]):
-                if vc is not None and vc.remove_controller(controller):
+                if vc is not None and await vc.remove_controller(controller):
                     virtual_controllers[i] = None
                     
             logger.info(virtual_controllers)
@@ -71,7 +71,7 @@ async def run_discovery(update_controllers_threadsafe, quit_event):
                 logger.info(virtual_controllers)
                 if update_controllers_threadsafe is not None:
                     update_controllers_threadsafe(virtual_controllers)
-            except BleakError:
+            except Exception:
                 logging.exception(f"Unable to initialize device {device.address}")
                 connected_mac_addresses.remove(device.address)
 
@@ -99,8 +99,9 @@ async def run_discovery(update_controllers_threadsafe, quit_event):
             await asyncio.get_event_loop().run_in_executor(None, quit_event.wait)
     finally:
         for vc in virtual_controllers:
-            for controller in vc.controllers:
-                await controller.disconnect()
+            if vc is not None:
+                for controller in vc.controllers:
+                    await controller.disconnect()
 
 def start_discoverer(update_controllers_threadsafe, quit_event):
     asyncio.run(run_discovery(update_controllers_threadsafe, quit_event))

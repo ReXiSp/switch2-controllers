@@ -7,7 +7,7 @@ from virtual_controller import VirtualController
 controller_frame_size = 200
 
 background_color = "#aaaaaa"
-block_color = "#666666"
+block_color = "#404040"
 player_number_bg_color = "#8B8B8B"
 
 CONTROLLER_UPDATED_EVENT = '<<ControllersUpdated>>'
