@@ -1,5 +1,6 @@
 """A class used to find switch 2 controllers via Bluetooth
 """
+import threading
 from bleak import BleakScanner, BleakClient, BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
@@ -17,25 +18,22 @@ logger = logging.getLogger(__name__)
 
 NINTENDO_BLUETOOTH_MANUFACTURER_ID = 0x0553
 
-class Discoverer:
-    def __init__(self):
-        pass
-
-async def run():
+async def run_discovery(update_controllers_threadsafe, quit_event):
     try:
         host_mac_value = convert_mac_string_to_value(bluetooth.read_local_bdaddr()[0])
-        stop_event = asyncio.Event()
         connected_mac_addresses: list[str] = []
-        virtual_controllers: list[VirtualController] = []
+        virtual_controllers: list[VirtualController] = [None] * 8
 
         def disconnected_controller(controller: Controller):
             logger.info(f"Controller disconected {controller.client.address}")
             connected_mac_addresses.remove(controller.client.address)
-            for vc in virtual_controllers[:]:
-                if vc.remove_controller(controller):
-                    virtual_controllers.remove(vc)
+            for i, vc in enumerate(virtual_controllers[:]):
+                if vc is not None and vc.remove_controller(controller):
+                    virtual_controllers[i] = None
                     
             logger.info(virtual_controllers)
+            if update_controllers_threadsafe is not None:
+                update_controllers_threadsafe(virtual_controllers)
 
         lock = asyncio.Lock()
 
@@ -54,13 +52,15 @@ async def run():
                     if CONFIG.combine_joycons:
                         # try to find an already connected joycon to combine with
                         if controller.is_joycon_left():
-                            virtual_controller = next(filter(lambda vc: vc.is_single_joycon_right(), virtual_controllers), None)
+                            virtual_controller = next(filter(lambda vc: vc is not None and vc.is_single_joycon_right(), virtual_controllers), None)
                         elif controller.is_joycon_right():
-                            virtual_controller = next(filter(lambda vc: vc.is_single_joycon_left(), virtual_controllers), None)
+                            virtual_controller = next(filter(lambda vc: vc is not None and vc.is_single_joycon_left(), virtual_controllers), None)
 
                     if virtual_controller is None:
-                        virtual_controller = VirtualController(len(virtual_controllers) + 1)
-                        virtual_controllers.append(virtual_controller)
+                        # Find an emtpy slot
+                        slot_index = next(i for i, c in enumerate(virtual_controllers) if c == None)
+                        virtual_controller = VirtualController(slot_index+1)
+                        virtual_controllers[slot_index] = virtual_controller
                     
                     virtual_controller.add_controller(controller)
                 finally:
@@ -69,6 +69,8 @@ async def run():
                 await virtual_controller.init_added_controller(controller)
 
                 logger.info(virtual_controllers)
+                if update_controllers_threadsafe is not None:
+                    update_controllers_threadsafe(virtual_controllers)
             except BleakError:
                 logging.exception(f"Unable to initialize device {device.address}")
                 connected_mac_addresses.remove(device.address)
@@ -94,11 +96,14 @@ async def run():
 
         async with BleakScanner(callback) as scanner:
             print("Presss a button on a paired controller, or hold sync button on an unpaired controller")
-            await stop_event.wait()
+            await asyncio.get_event_loop().run_in_executor(None, quit_event.wait)
     finally:
         for vc in virtual_controllers:
             for controller in vc.controllers:
                 await controller.disconnect()
 
+def start_discoverer(update_controllers_threadsafe, quit_event):
+    asyncio.run(run_discovery(update_controllers_threadsafe, quit_event))
+
 if __name__ == "__main__":
-    asyncio.run(run())
+    start_discoverer(None, threading.Event())

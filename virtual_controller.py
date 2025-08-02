@@ -43,7 +43,8 @@ class VirtualController:
                     self.next_vibration_event = next_event
 
                 async def send_vibration_task():
-                    while True:
+                    # imit for how long we vibrate if we don't receive any command, just in case
+                    for i in range(500):
                         if self.is_single():
                             await self.controllers[0].set_vibration(vibrationData)
                         elif len(self.controllers) == 2:
