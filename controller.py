@@ -222,6 +222,7 @@ class Controller:
         self.right_stick_calibration: StickCalibrationData = None
         self.previous_mouse_state: MouseState = None
 
+        self.side_buttons_pressed = False
         self.response_future = None
         self.vibration_packet_id = 0
 
@@ -258,6 +259,9 @@ class Controller:
         self.controller_info = await self.read_controller_info()
         self.stick_calibration, self.second_stick_calibration = await self.read_calibration_data()
 
+        # Enable input report notification
+        await self.enable_input_notify_callback()
+        
         if CONFIG.mouse_config.enabled:
             await self.enableFeatures(FEATURE_MOUSE)
 
@@ -369,26 +373,28 @@ class Controller:
     
     ### Callbacks ###
 
-    async def set_input_report_callback(self, callback):
-        if self.input_report_callback is None:
-            # Enable notifiy if not done already
-            def input_report_callback(sender, data):
-                inputData = ControllerInputData(data, self.stick_calibration, self.second_stick_calibration)
+    async def enable_input_notify_callback(self):
+        def input_report_callback(sender, data):
+            inputData = ControllerInputData(data, self.stick_calibration, self.second_stick_calibration)
 
-                self.simulate_mouse(inputData)
+            if inputData.buttons & (SWITCH_BUTTONS["SR_R"] | SWITCH_BUTTONS["SR_L"] | SWITCH_BUTTONS["SL_R"] | SWITCH_BUTTONS["SL_L"]):
+                self.side_buttons_pressed = True
 
-                if self.input_report_callback is not None:
-                    self.input_report_callback(inputData, self)
+            self.simulate_mouse(inputData)
 
-            await self.client.start_notify(INPUT_REPORT_UUID, input_report_callback)
+            if self.input_report_callback is not None:
+                self.input_report_callback(inputData, self)
 
+        await self.client.start_notify(INPUT_REPORT_UUID, input_report_callback)
+
+    def set_input_report_callback(self, callback):
         self.input_report_callback = callback
 
     def simulate_mouse(self, inputData: ControllerInputData):
         mouse_config = CONFIG.mouse_config
         if mouse_config.enabled and self.is_joycon():
             # Check if joycon is being used as a mouse
-            if inputData.mouse_distance < 1000 and inputData.mouse_roughness < 4000:
+            if inputData.mouse_distance != 0 and inputData.mouse_distance < 1000 and inputData.mouse_roughness < 4000:
                 x, y = inputData.mouse_coords
                 mouseButtonsConfig = mouse_config.joycon_l_buttons if self.is_joycon_left() else mouse_config.joycon_r_buttons
                 lb = inputData.buttons & mouseButtonsConfig.left_button

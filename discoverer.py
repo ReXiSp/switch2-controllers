@@ -49,7 +49,7 @@ async def run_discovery(update_controllers_threadsafe, quit_event):
                 virtual_controller = None
                 await lock.acquire()
                 try:
-                    if CONFIG.combine_joycons:
+                    if CONFIG.combine_joycons and not controller.side_buttons_pressed:
                         # try to find an already connected joycon to combine with
                         if controller.is_joycon_left():
                             virtual_controller = next(filter(lambda vc: vc is not None and vc.is_single_joycon_right(), virtual_controllers), None)

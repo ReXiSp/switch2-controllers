@@ -117,7 +117,7 @@ class VirtualController:
 
             self.xb_controller.update()
 
-        await controller.set_input_report_callback(input_report_callback)
+        controller.set_input_report_callback(input_report_callback)
 
 
     def remove_controller(self, controller: Controller):
