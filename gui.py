@@ -78,7 +78,7 @@ class ControllerWindow:
         photo = tk.PhotoImage(file = get_resource('images/icon.png'))
         self.root.wm_iconphoto(False, photo)
         self.root.title("Switch2 Controllers")
-        self.root.geometry("1000x600+50+50")
+        self.root.geometry("1000x400+50+50")
         self.root.minsize(1000,400)
         self.root.config(bg=background_color, padx=10, pady=10)
         self.font = tkFont.Font(family="Arial", size=16, weight="bold")

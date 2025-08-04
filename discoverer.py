@@ -72,7 +72,7 @@ async def run_discovery(update_controllers_threadsafe, quit_event):
                 if update_controllers_threadsafe is not None:
                     update_controllers_threadsafe(virtual_controllers)
             except Exception:
-                logging.exception(f"Unable to initialize device {device.address}")
+                logger.exception(f"Unable to initialize device {device.address}")
                 connected_mac_addresses.remove(device.address)
 
         async def callback(device: BLEDevice, advertising_data: AdvertisementData):
@@ -84,13 +84,13 @@ async def run_discovery(update_controllers_threadsafe, quit_event):
                 product_id = decodeu(nintendo_manufacturer_data[5:7])
                 reconnect_mac = decodeu(nintendo_manufacturer_data[10:16])
                 if vendor_id == NINTENDO_VENDOR_ID and product_id in CONTROLER_NAMES:
-                    logging.debug(f"Manufacturer data: {to_hex(nintendo_manufacturer_data)}")
+                    logger.debug(f"Manufacturer data: {to_hex(nintendo_manufacturer_data)}")
                     if reconnect_mac == 0:
-                        logging.info(f"Found pairing device {CONTROLER_NAMES[product_id]} {device.address}")
+                        logger.info(f"Found pairing device {CONTROLER_NAMES[product_id]} {device.address}")
                         connected_mac_addresses.append(device.address)
                         await add_controller(device, False)
                     elif reconnect_mac == host_mac_value:
-                        logging.info(f"Found already paired device {CONTROLER_NAMES[product_id]} {device.address}")
+                        logger.info(f"Found already paired device {CONTROLER_NAMES[product_id]} {device.address}")
                         connected_mac_addresses.append(device.address)
                         await add_controller(device, True)
 
