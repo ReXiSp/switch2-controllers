@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import os
 import yaml
 import logging
 
@@ -146,6 +147,7 @@ class Config:
 
         logger.info(f"Config successfully read {self}")
 
-
+def get_resource(resource_path: str):
+    return os.path.join(os.path.dirname(__file__), 'resources', resource_path)
     
-CONFIG = Config("config.yaml")
+CONFIG = Config(get_resource("config.yaml"))

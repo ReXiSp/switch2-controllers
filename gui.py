@@ -1,7 +1,9 @@
 import queue
 import threading
 import tkinter as tk
+import tkinter.font as tkFont
 from discoverer import start_discoverer
+from config import get_resource
 from virtual_controller import VirtualController
 
 controller_frame_size = 200
@@ -31,12 +33,11 @@ class PlayerInfoBlock:
         self.controllers_frame.pack_propagate(False)
 
     def load_pictures(self):
-        self.joycon2right = tk.PhotoImage(file="images/joycon2right.png")
-        self.joycon2left = tk.PhotoImage(file="images/joycon2left.png")
-        self.joycon2leftandright = tk.PhotoImage(file="images/joycon2leftandright.png")
-        self.joycon2right_sideway = tk.PhotoImage(file="images/joycon2right_sideway.png")
-        self.joycon2left_sideway = tk.PhotoImage(file="images/joycon2left_sideway.png")
-        self.player_leds = {nb: tk.PhotoImage(file=f"images/player{nb}.png") for nb in range(1,5)}
+        self.joycon2leftandright = tk.PhotoImage(file=get_resource("images/joycon2leftandright.png"))
+        self.joycon2right_sideway = tk.PhotoImage(file=get_resource("images/joycon2right_sideway.png"))
+        self.joycon2left_sideway = tk.PhotoImage(file=get_resource("images/joycon2left_sideway.png"))
+        self.procontroller2 = tk.PhotoImage(file=get_resource("images/procontroller2.png"))
+        self.player_leds = {nb: tk.PhotoImage(file=get_resource(f"images/player{nb}.png")) for nb in range(1,5)}
 
     def clearControllerInfo(self):
         if self.controller_label is not None:
@@ -48,10 +49,15 @@ class PlayerInfoBlock:
             self.player_led_label = None
 
     def displayControllersInfo(self, virtualController : VirtualController):
-        if virtualController.is_single():
-            image = self.joycon2right_sideway if virtualController.is_single_joycon_right() else self.joycon2left_sideway
-        else:
+        if not virtualController.is_single():
             image = self.joycon2leftandright
+        elif virtualController.is_single_joycon_right():
+            image = self.joycon2right_sideway
+        elif virtualController.is_single_joycon_left():
+            image = self.joycon2left_sideway
+        else:
+            image = self.procontroller2
+
 
         self.controller_label = tk.Label(self.controllers_frame, image=image, bg=block_color)
         self.controller_label.pack(fill="none", expand=True)
@@ -61,41 +67,52 @@ class PlayerInfoBlock:
 
 class ControllerWindow:
     def __init__(self):
+        self.root = None
+        self.main_frame = None
+        self.no_controllers = True
         self.message_queue = queue.Queue()
         self.quit_event = threading.Event()
     
     def init_interface(self):
         self.root = tk.Tk()
-        photo = tk.PhotoImage(file = 'images/icon.png')
+        photo = tk.PhotoImage(file = get_resource('images/icon.png'))
         self.root.wm_iconphoto(False, photo)
         self.root.title("Switch2 Controllers")
         self.root.geometry("1000x600+50+50")
+        self.root.minsize(1000,400)
         self.root.config(bg=background_color, padx=10, pady=10)
+        self.font = tkFont.Font(family="Arial", size=16, weight="bold")
+        self.pairing_hint_image = tk.PhotoImage(file=get_resource("images/pairing_hint.png"))
 
-        tk.Label(self.root, text="Press and hold sync button, or press a button on an already paired controller.", bg=background_color).pack()
+        self.update([None])
 
-        frame_players = tk.Frame(self.root, bg=background_color)
-        frame_players.pack(pady=50, fill=tk.Y)
+    def update(self, controllers_info):
+        self.no_controllers = all(c is None for c in controllers_info)
+        
+        if self.main_frame is not None:
+            self.main_frame.destroy()
 
-        self.players_info = [PlayerInfoBlock(frame_players) for i in range(4)]
+        self.main_frame = tk.Frame(self.root, bg=background_color)
+        self.main_frame.pack(pady=50, fill=tk.Y)
 
-    def update_controllers_from_queue(self):
-        controllers_info = self.message_queue.get()
+        if self.no_controllers:
+            tk.Label(self.main_frame, text="Press button of a paired controller, or hold sync button to pair", font=self.font, bg=background_color).pack()
+            pairing_hint = tk.Label(self.main_frame, image=self.pairing_hint_image, bg=background_color)
+            pairing_hint.pack(pady=10)
+        else:
+            self.players_info = [PlayerInfoBlock(self.main_frame) for i in range(4)]
 
-        for player_info in self.players_info:
-            player_info.clearControllerInfo()
-
-        for i, player_info in enumerate(self.players_info):
-            controller_info = controllers_info[i]
-            if controller_info is not None:
-                player_info.displayControllersInfo(controller_info)
+            for i, player_info in enumerate(self.players_info):
+                controller_info = controllers_info[i]
+                if controller_info is not None:
+                    player_info.displayControllersInfo(controller_info)
 
     def start(self):
         def update_controllers_callback_threadsafe(controllers: list[VirtualController]):
             self.message_queue.put(controllers)
             self.root.event_generate(CONTROLLER_UPDATED_EVENT)
         
-        self.root.bind(CONTROLLER_UPDATED_EVENT, lambda e : self.update_controllers_from_queue())
+        self.root.bind(CONTROLLER_UPDATED_EVENT, lambda e : self.update(self.message_queue.get()))
         t = threading.Thread(target=start_discoverer, args=(update_controllers_callback_threadsafe, self.quit_event))
         t.start()
 

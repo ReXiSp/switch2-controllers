@@ -1,0 +1,1 @@
+pyinstaller .\gui.py --add-data "resources;resources" --collect-binaries=vgamepad --onefile
