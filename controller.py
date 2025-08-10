@@ -4,6 +4,7 @@ import asyncio
 import logging
 import bluetooth
 import win32api
+import sys
 import win32con
 from dataclasses import dataclass
 from config import CONFIG, SWITCH_BUTTONS
@@ -31,7 +32,7 @@ CONTROLER_NAMES = {
 INPUT_REPORT_UUID = "ab7de9be-89fe-49ad-828f-118f09df7fd2"
 VIBRATION_WRITE_JOYCON_R_UUID = "fa19b0fb-cd1f-46a7-84a1-bbb09e00c149"
 VIBRATION_WRITE_JOYCON_L_UUID = "289326cb-a471-485d-a8f4-240c14f18241"
-VIBRATION_WRITE_PRO_CONTROLLER_UUID = "cc483f51-9258-427d-a939-630c31f72b05"
+VIBRATION_WRITE_PRO_CONTROLLER2_UUID = "cc483f51-9258-427d-a939-630c31f72b05"
 
 COMMAND_WRITE_UUID = "649d4ac9-8eb7-4e6c-af44-1ea54fe5f005"
 COMMAND_RESPONSE_UUID = "c765a961-d9d8-4d36-a20a-5315b111836a"
@@ -57,6 +58,7 @@ SUBCOMMAND_FEATURE_INIT = 0x02
 SUBCOMMAND_FEATURE_ENABLE = 0x04
 
 FEATURE_MOTION = 0x04
+FEATUER_BATTERY_CURRENT = 0x20
 FEATURE_MOUSE = 0x10
 FEATURE_MAGNOMETER = 0x80
 
@@ -120,7 +122,6 @@ class ControllerInputData:
     temperature: int
     accelerometer: tuple[int, int, int]
     gyroscope: tuple[int, int, int]
-
 
     def __init__(self, data: bytes, left_stick_calibration: StickCalibrationData, right_stick_calibration: StickCalibrationData):
         self.raw_data = data
@@ -186,11 +187,11 @@ class ControllerInfo:
 
 @dataclass
 class VibrationData:
-    lf_freq: int = 0x0e1
+    lf_freq: int = 0x100
     lf_en_tone: bool = False
     lf_amp: int = 0x000
-    hf_freq: int = 0x1e1
-    hf_en_tone : int = False
+    hf_freq: int = 0x0
+    hf_en_tone : bool = False
     hf_amp: int = 0x000
 
     def get_bytes(self):
@@ -204,7 +205,7 @@ class VibrationData:
         value |= (self.hf_freq & 0x1FF) << 20  # 9bits
         value |= int(self.hf_en_tone) << 29    # 1 bit
         value |= (self.hf_amp & 0x3FF) << 30   # 10 bits
-
+        # print(f"{value:08X}")
         # High Freaquency
         return value.to_bytes(byteorder='little', length=5)
 
@@ -226,7 +227,6 @@ class Controller:
         self.side_buttons_pressed = False
         self.response_future = None
         self.vibration_packet_id = 0
-        self.battery_voltage = None
 
     def __repr__(self):
         return f"{CONTROLER_NAMES[self.controller_info.product_id]} : {self.device.address}"
@@ -247,7 +247,7 @@ class Controller:
         from bleak.backends.winrt.client import BleakClientWinRT
         from winrt.windows.devices.bluetooth import BluetoothLEPreferredConnectionParameters
         backend = self.client._backend
-        if isinstance(backend, BleakClientWinRT):
+        if isinstance(backend, BleakClientWinRT) and sys.getwindowsversion().build >= 22000:
             backend._requester.request_preferred_connection_parameters(BluetoothLEPreferredConnectionParameters.throughput_optimized)
 
         # Needed to get response from commands
@@ -266,6 +266,8 @@ class Controller:
         
         if CONFIG.mouse_config.enabled:
             await self.enableFeatures(FEATURE_MOUSE)
+        if CONFIG.motion_controls:
+            await self.enableFeatures(FEATURE_MOTION)
 
         logger.debug(f"Succesfully initialized {self.device.address} : {self.controller_info}")
 
@@ -285,19 +287,14 @@ class Controller:
             await self.client.disconnect()
 
     ### Set vibration ###
-    async def set_vibration(self, vibration: VibrationData, vibration2 = VibrationData(), vibration3 = VibrationData()):
+    async def set_vibration(self, vibration: VibrationData):
         """Set vibration data"""
-        logger.debug("Sending vibration")
-        
-        motor_vibrations =  (0x50 + (self.vibration_packet_id & 0x0F)).to_bytes() + vibration.get_bytes() + vibration2.get_bytes() + vibration3.get_bytes()
-
         if self.is_joycon_left():
-            await self.client.write_gatt_char(VIBRATION_WRITE_JOYCON_L_UUID, (b'\x00' + motor_vibrations))
+            await self.client.write_gatt_char(VIBRATION_WRITE_JOYCON_L_UUID, (b'\x00' + (0x50 + (self.vibration_packet_id & 0x0F)).to_bytes() + vibration.get_bytes()).ljust(17, b'\0'))
         elif self.is_joycon_right():
-            await self.client.write_gatt_char(VIBRATION_WRITE_JOYCON_R_UUID, (b'\x00' + motor_vibrations))
-        elif self.is_pro_controller():
-            # Left and right motors vibrations
-            await self.client.write_gatt_char(VIBRATION_WRITE_PRO_CONTROLLER_UUID, (b'\x00' + motor_vibrations + motor_vibrations))
+            await self.client.write_gatt_char(VIBRATION_WRITE_JOYCON_R_UUID, (b'\x00' + (0x50 + (self.vibration_packet_id & 0x0F)).to_bytes() + vibration.get_bytes()).ljust(17, b'\0'))
+        elif self.is_pro_controller2():
+            await self.client.write_gatt_char(VIBRATION_WRITE_PRO_CONTROLLER2_UUID, (b'\x00' + (0x50 + (self.vibration_packet_id & 0x0F)).to_bytes() + vibration.get_bytes()).ljust(17, b'\0'))
 
         self.vibration_packet_id += 1
 
@@ -389,8 +386,6 @@ class Controller:
         def input_report_callback(sender, data):
             inputData = ControllerInputData(data, self.stick_calibration, self.second_stick_calibration)
 
-            self.battery_voltage = inputData.battery_voltage
-
             if inputData.buttons & (SWITCH_BUTTONS["SR_R"] | SWITCH_BUTTONS["SR_L"] | SWITCH_BUTTONS["SL_R"] | SWITCH_BUTTONS["SL_L"]):
                 self.side_buttons_pressed = True
 
@@ -456,11 +451,11 @@ class Controller:
     def is_joycon_left(self):
         return self.controller_info.product_id == JOYCON2_LEFT_PID
     
+    def is_pro_controller2(self):
+        return self.controller_info.product_id == PRO_CONTROLLER2_PID
+    
     def is_joycon(self):
         return self.is_joycon_left() or self.is_joycon_right()
-    
-    def is_pro_controller(self):
-        return self.controller_info.product_id == PRO_CONTROLLER2_PID
 
     def has_second_stick(self):
         return self.controller_info.product_id in [PRO_CONTROLLER2_PID, NSO_GAMECUBE_CONTROLLER_PID]

@@ -1,7 +1,8 @@
 import vgamepad
 import asyncio
 import threading
-
+import ctypes
+import vgamepad.win.vigem_commons as vcom
 from controller import Controller, ControllerInputData, VibrationData
 from config import CONFIG, ButtonConfig
 import logging
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 class VirtualController:
     player_number: int
     controllers: list[Controller]
-    xb_controller: vgamepad.VX360Gamepad
+    xb_controller: vgamepad.VDS4Gamepad
     previous_buttons_left: int
     previous_buttons_right: int
     next_vibration_event: asyncio.Event
@@ -19,7 +20,7 @@ class VirtualController:
     def __init__(self, player_number: int):
         self.player_number = player_number
         self.controllers = []
-        self.xb_controller = vgamepad.VX360Gamepad()
+        self.xb_controller = vgamepad.VDS4Gamepad()
         self.previous_buttons_left = 0x00000000
         self.previous_buttons_right = 0x00000000
         self.next_vibration_event = None
@@ -74,11 +75,8 @@ class VirtualController:
             if not (existing_controller.is_joycon_left() and controller.is_joycon_right() or
                     existing_controller.is_joycon_right() and controller.is_joycon_left):
                 raise Exception("Can only combine left and right joycons")
-        # add while keeping joycon left first and joyconright second
-        if len(self.controllers) > 0 and self.controllers[0].is_joycon_right():
-            self.controllers.insert(0, controller)
-        else:
-            self.controllers.append(controller)
+            
+        self.controllers.append(controller)
 
     async def init_added_controller(self, controller: Controller):
         """This async method needs to be called after calling add_controller"""
@@ -87,6 +85,7 @@ class VirtualController:
 
         def input_report_callback(inputData: ControllerInputData, controller: Controller):
             buttons = inputData.buttons
+            # print(f"Raw data: {inputData.raw_data[0:].hex(' ')}")
 
             if not self.is_single():
                 buttonsConfig = CONFIG.dual_joycons_config
@@ -104,21 +103,43 @@ class VirtualController:
             else:
                 buttonsConfig = CONFIG.procon_config
 
-            self.xb_controller.report.wButtons, left_trigger, right_trigger = buttonsConfig.convert_buttons(buttons)
-            self.xb_controller.left_trigger(255 if left_trigger else 0)
-            self.xb_controller.right_trigger(255 if right_trigger else 0)
+            report = vcom.DS4_SUB_REPORT_EX()
 
+            report.wButtons, report.bSpecial, dpad_direction, left_trigger, right_trigger = buttonsConfig.convert_buttons(buttons)
+            vcom.DS4_SET_DPAD(report, dpad_direction)
+            report.bTriggerL = 255 if left_trigger else 0
+            report.bTriggerR = 255 if right_trigger else 0
             if controller.is_joycon_right() and self.is_single():
-                self.xb_controller.left_joystick_float(inputData.right_stick[1], -inputData.right_stick[0])
+                report.bThumbRX = 128 + round(inputData.right_stick[1] * 127)
+                report.bThumbRY = 128 + round(inputData.right_stick[0] * 127)
+                # self.xb_controller.left_joystick_float(inputData.right_stick[1], -inputData.right_stick[0])
+
             elif controller.is_joycon_left() and self.is_single():
-                self.xb_controller.left_joystick_float(-inputData.left_stick[1], inputData.left_stick[0])
+                report.bThumbLX = 128 + round(-inputData.left_stick[1] * 127)
+                report.bThumbLY = 128 + round(-inputData.left_stick[0] * 127)
+                # self.xb_controller.left_joystick_float(-inputData.left_stick[1], inputData.left_stick[0])
             else:
                 if not controller.is_joycon_left(): # dual stick or joycon right (dual)
-                    self.xb_controller.right_joystick_float(inputData.right_stick[0], inputData.right_stick[1])
+                    report.bThumbRX = 128 + round(inputData.right_stick[0] * 127)
+                    report.bThumbRY = 128 + round(-inputData.right_stick[1] * 127)
+                    # self.xb_controller.right_joystick_float(inputData.right_stick[0], -inputData.right_stick[1])
                 if not controller.is_joycon_right(): # dual stick or joycon left (dual)
-                    self.xb_controller.left_joystick_float(inputData.left_stick[0], inputData.left_stick[1])
+                    report.bThumbLX = 128 + round(inputData.left_stick[0] * 127)
+                    report.bThumbLY = 128 + round(-inputData.left_stick[1] * 127)
+                    # self.xb_controller.left_joystick_float(inputData.left_stick[0], -inputData.left_stick[1])
+            
+            # Motion Controls 
+            report.wAccelX = inputData.accelerometer[0] * 2
+            report.wAccelY = inputData.accelerometer[2] * 2
+            report.wAccelZ = -inputData.accelerometer[1] * 2
+            report.wGyroX = inputData.gyroscope[0]
+            report.wGyroY = inputData.gyroscope[2]
+            report.wGyroZ = -inputData.gyroscope[1]
 
-            self.xb_controller.update()
+            ex = vcom.DS4_REPORT_EX(Report=report)
+            # print(f"X: {report.wAccelX}, Y: {report.wAccelY}, Z: {report.wAccelZ}, X: {report.wGyroX}, Y: {report.wGyroY}, Z: {report.wGyroZ}")
+
+            self.xb_controller.update_extended_report(ex)
 
         controller.set_input_report_callback(input_report_callback)
 

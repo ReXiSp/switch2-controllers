@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "*.frag": "glsl",
+        "*.txt": "cpp",
+        "thread": "cpp"
+    }
+}
