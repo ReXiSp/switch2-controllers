@@ -70,6 +70,8 @@ buttons:
     LEFT: LEFT
     L: LB
     ZL: LT
+    GR: A
+    GL: B
 mouse:
   enabled: true
   sensitivity: 0.8

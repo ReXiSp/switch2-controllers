@@ -31,6 +31,7 @@ CONTROLER_NAMES = {
 INPUT_REPORT_UUID = "ab7de9be-89fe-49ad-828f-118f09df7fd2"
 VIBRATION_WRITE_JOYCON_R_UUID = "fa19b0fb-cd1f-46a7-84a1-bbb09e00c149"
 VIBRATION_WRITE_JOYCON_L_UUID = "289326cb-a471-485d-a8f4-240c14f18241"
+VIBRATION_WRITE_PRO_CONTROLLER_UUID = "cc483f51-9258-427d-a939-630c31f72b05"
 
 COMMAND_WRITE_UUID = "649d4ac9-8eb7-4e6c-af44-1ea54fe5f005"
 COMMAND_RESPONSE_UUID = "c765a961-d9d8-4d36-a20a-5315b111836a"
@@ -283,13 +284,19 @@ class Controller:
             await self.client.disconnect()
 
     ### Set vibration ###
-    async def set_vibration(self, vibration: VibrationData):
+    async def set_vibration(self, vibration: VibrationData, vibration2 = VibrationData(), vibration3 = VibrationData()):
         """Set vibration data"""
         logger.debug("Sending vibration")
+        
+        motor_vibrations =  (0x50 + (self.vibration_packet_id & 0x0F)).to_bytes() + vibration.get_bytes() + vibration2.get_bytes() + vibration3.get_bytes()
+
         if self.is_joycon_left():
-            await self.client.write_gatt_char(VIBRATION_WRITE_JOYCON_L_UUID, (b'\x00' + (0x50 + (self.vibration_packet_id & 0x0F)).to_bytes() + vibration.get_bytes()).ljust(17, b'\0'))
+            await self.client.write_gatt_char(VIBRATION_WRITE_JOYCON_L_UUID, (b'\x00' + motor_vibrations))
         elif self.is_joycon_right():
-            await self.client.write_gatt_char(VIBRATION_WRITE_JOYCON_R_UUID, (b'\x00' + (0x50 + (self.vibration_packet_id & 0x0F)).to_bytes() + vibration.get_bytes()).ljust(17, b'\0'))
+            await self.client.write_gatt_char(VIBRATION_WRITE_JOYCON_R_UUID, (b'\x00' + motor_vibrations))
+        elif self.is_pro_controller():
+            # Left and right motors vibrations
+            await self.client.write_gatt_char(VIBRATION_WRITE_PRO_CONTROLLER_UUID, (b'\x00' + motor_vibrations + motor_vibrations))
 
         self.vibration_packet_id += 1
 
@@ -448,6 +455,9 @@ class Controller:
     
     def is_joycon(self):
         return self.is_joycon_left() or self.is_joycon_right()
+    
+    def is_pro_controller(self):
+        return self.controller_info.product_id == PRO_CONTROLLER2_PID
 
     def has_second_stick(self):
         return self.controller_info.product_id in [PRO_CONTROLLER2_PID, NSO_GAMECUBE_CONTROLLER_PID]
