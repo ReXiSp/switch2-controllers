@@ -226,6 +226,7 @@ class Controller:
         self.side_buttons_pressed = False
         self.response_future = None
         self.vibration_packet_id = 0
+        self.battery_voltage = None
 
     def __repr__(self):
         return f"{CONTROLER_NAMES[self.controller_info.product_id]} : {self.device.address}"
@@ -387,6 +388,8 @@ class Controller:
     async def enable_input_notify_callback(self):
         def input_report_callback(sender, data):
             inputData = ControllerInputData(data, self.stick_calibration, self.second_stick_calibration)
+
+            self.battery_voltage = inputData.battery_voltage
 
             if inputData.buttons & (SWITCH_BUTTONS["SR_R"] | SWITCH_BUTTONS["SR_L"] | SWITCH_BUTTONS["SL_R"] | SWITCH_BUTTONS["SL_L"]):
                 self.side_buttons_pressed = True

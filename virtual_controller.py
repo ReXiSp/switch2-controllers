@@ -74,8 +74,11 @@ class VirtualController:
             if not (existing_controller.is_joycon_left() and controller.is_joycon_right() or
                     existing_controller.is_joycon_right() and controller.is_joycon_left):
                 raise Exception("Can only combine left and right joycons")
-            
-        self.controllers.append(controller)
+        # add while keeping joycon left first and joyconright second
+        if len(self.controllers) > 0 and self.controllers[0].is_joycon_right():
+            self.controllers.insert(0, controller)
+        else:
+            self.controllers.append(controller)
 
     async def init_added_controller(self, controller: Controller):
         """This async method needs to be called after calling add_controller"""
