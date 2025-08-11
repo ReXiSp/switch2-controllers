@@ -155,9 +155,9 @@ def read_calibration_data():
         calibration_data_2 = read_memory(0x0b, CALIBRATION_JOYSTICK_2)
     return StickCalibrationData(calibration_data_1), StickCalibrationData(calibration_data_2)
 
-next_vibration_event: asyncio.Event = None
 vibration_packet_id = 0
 device = None
+vibration = VibrationData()
 
 async def set_vibration(vibration: VibrationData):
     global vibration_packet_id
@@ -168,39 +168,32 @@ async def set_vibration(vibration: VibrationData):
         device.write(payload)
     vibration_packet_id += 1
 
+# 振動処理を専門に行う非同期ワーカー
+async def vibration_worker():
+    global vibration
+    print("Vibration worker started.")
+    
+    while True:
+        await set_vibration(vibration)
+        await asyncio.sleep(0.005)
+
+# ワーカースレッドでイベントループを実行する関数
+def run_vibration_loop_in_thread(loop):
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
 def vibration_callback(client, target, large_motor, small_motor, led_number, user_data):
-    global next_vibration_event
-    # print("Vibration : {}, {}".format(large_motor, small_motor))
+    global vibration
+    """vibration_workerにデータを渡すことだけを行う軽量なコールバック"""
     vibrationData = VibrationData()
-    vibrationData.lf_amp = int(800 * large_motor / 256)
-    vibrationData.hf_amp = int(800 * small_motor / 256)
-    # print(vibrationData.hf_amp)
-    if next_vibration_event:
-        # Notifify previous call to stop sending vibration commands
-        next_vibration_event.set()
-        next_vibration_event = None
+    vibrationData.lf_amp = int(800 * large_motor / 255) if large_motor > 0 else 0
+    vibrationData.hf_amp = int(800 * small_motor / 255) if small_motor > 0 else 0
+    
+    # キューに古いデータがあればクリアし、新しいデータを追加
+    vibration = vibrationData
 
-    next_event = asyncio.Event()
-    if large_motor == 0 and small_motor == 0:
-        # No Need to send command repeatedly
-        next_event.set()
-    else:
-        next_vibration_event = next_event
-
-    async def send_vibration_task():
-        # imit for how long we vibrate if we don't receive any command, just in case
-        for i in range(500):
-            await set_vibration(vibrationData)
-            # await asyncio.sleep(0.02)
-            if next_event.is_set():
-                break
-
-    def run_async_loop_in_thread():
-        asyncio.run(send_vibration_task())
-
-    t = threading.Thread(target=run_async_loop_in_thread)
-    t.start()
-
+worker_loop = None
+worker_thread = None
 try:
     print("Initializing...")
     write_command(COMMAND_USB, SUBCOMMAND_INIT, bytes.fromhex("01 00 FF FF FF FF FF FF"))
@@ -225,6 +218,16 @@ try:
     controller = vgamepad.VDS4Gamepad()
     controller.register_notification(callback_function=vibration_callback)
     print("VGamepad Init")
+
+    worker_loop = asyncio.new_event_loop()
+    worker_thread = threading.Thread(
+        target=run_vibration_loop_in_thread,
+        args=(worker_loop,),
+        daemon=True
+    )
+    worker_thread.start()
+    # vibration_workerコルーチンをイベントループで実行するようにスケジュール
+    asyncio.run_coroutine_threadsafe(vibration_worker(), worker_loop)
 
     report = vcom.DS4_SUB_REPORT_EX()
 
@@ -269,6 +272,23 @@ try:
 
 except usb.core.USBError as e:
     print(f"Error while transfer: {e}")
+except KeyboardInterrupt:
+    print("Interupted")
 finally:
+    if worker_loop and worker_loop.is_running():
+        # イベントループで実行中の全てのタスクをキャンセル
+        tasks = asyncio.all_tasks(loop=worker_loop)
+        for task in tasks:
+            task.cancel()
+        # ループを停止
+        worker_loop.call_soon_threadsafe(worker_loop.stop)
+    
+    # スレッドが終了するのを待つ（必要に応じて）
+    if worker_thread and worker_thread.is_alive():
+        worker_thread.join(timeout=1)
+    print("Vibration worker stopped.")
+
+    if device:
+        device.close()
     usb.util.release_interface(dev, USB_INTERFACE_NUMBER)
     usb.util.dispose_resources(dev)

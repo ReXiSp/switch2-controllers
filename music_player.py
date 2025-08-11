@@ -160,6 +160,20 @@ next_vibration_event: asyncio.Event = None
 vibration_packet_id = 0
 device = None
 
+def set__vibration(vibration: VibrationData):
+    global vibration_packet_id
+    """Set vibration data"""
+    payload = (b'\x02' + (0x50 + (vibration_packet_id & 0x0F)).to_bytes() + vibration.get_bytes()).ljust(17, b'\0')
+    if device:
+        # print(payload.hex(" "))
+        try:
+            device.write(payload)
+        except Exception:
+            traceback.print_exc()
+    vibration_packet_id += 1
+    if vibration_packet_id > 9:
+        vibration_packet_id = 0
+
 async def set_vibration(vibration: VibrationData):
     global vibration_packet_id
     """Set vibration data"""
@@ -243,7 +257,6 @@ try:
     # write_command(COMMAND_USB, SUBCOMMAND_REPORT_TYPE, bytes.fromhex("05 00 00 00"))
 
     #SET LED
-    set_leds(1)
     enableFeatures(FEATUER_VIBRATION)
     print("Initialized.")
     device = hid.device()
@@ -281,10 +294,10 @@ try:
 
             # Process Queue
             if len(playingNotes) <= 0:
-                stop_vibration()
+                # stop_vibration()
+                pass
 
             for note in range(0, len(playingNotes), 2):
-
                 if note + 1 >= conf["sound_count"]:
                     break
 
@@ -298,10 +311,12 @@ try:
                     vib.hf_freq = playingNotes[note + 1][2]
                     vib.hf_en_tone = vib.hf_freq >= 0
 
-                send_vibration(vib)
-                time.sleep(0.015)
+                set__vibration(vib)
             
             print(playingNotes)
+
+            data = len(playingNotes).to_bytes().ljust(4, b'\0')
+            write_command(COMMAND_LEDS, SUBCOMMAND_LEDS_SET_PLAYER, data)
 
             if len(playingNotes) > 0:
                 while True:
@@ -309,7 +324,7 @@ try:
                         break
                     playingNotes.pop(0)
 
-            time.sleep(0.01)
+            # time.sleep(0.01)
 
     except KeyboardInterrupt:
         print("Interrupt")
