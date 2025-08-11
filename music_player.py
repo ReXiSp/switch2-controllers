@@ -160,7 +160,7 @@ next_vibration_event: asyncio.Event = None
 vibration_packet_id = 0
 device = None
 
-def set__vibration(vibration: VibrationData):
+def set_vibration(vibration: VibrationData):
     global vibration_packet_id
     """Set vibration data"""
     payload = (b'\x02' + (0x50 + (vibration_packet_id & 0x0F)).to_bytes() + vibration.get_bytes()).ljust(17, b'\0')
@@ -173,46 +173,6 @@ def set__vibration(vibration: VibrationData):
     vibration_packet_id += 1
     if vibration_packet_id > 9:
         vibration_packet_id = 0
-
-async def set_vibration(vibration: VibrationData):
-    global vibration_packet_id
-    """Set vibration data"""
-    payload = (b'\x02' + (0x50 + (vibration_packet_id & 0x0F)).to_bytes() + vibration.get_bytes()).ljust(17, b'\0')
-    if device:
-        # print(payload.hex(" "))
-        try:
-            device.write(payload)
-        except Exception:
-            traceback.print_exc()
-    vibration_packet_id += 1
-    if vibration_packet_id > 9:
-        vibration_packet_id = 0
-
-def send_vibration(vibration: VibrationData):
-    global next_vibration_event
-    if next_vibration_event:
-        # Notifify previous call to stop sending vibration commands
-        next_vibration_event.set()
-        next_vibration_event = None
-    next_event = asyncio.Event()
-    if vibration.lf_amp == 0 and vibration.hf_amp == 0:
-        # No Need to send command repeatedly
-        next_event.set()
-    else:
-        next_vibration_event = next_event
-
-    async def send_vibration_task():
-        # imit for how long we vibrate if we don't receive any command, just in case
-        for i in range(100):
-            await set_vibration(vibration)
-            # await asyncio.sleep(0.02)
-            if next_event.is_set():
-                break
-
-    def run_async_loop_in_thread():
-        asyncio.run(send_vibration_task())
-    t = threading.Thread(target=run_async_loop_in_thread)
-    t.start()
 
 A = 403.1279
 B = 0.00718869
@@ -221,7 +181,7 @@ def stop_vibration():
     vib = VibrationData()
     vib.hf_amp = 0
     vib.lf_amp = 0
-    send_vibration(vib)
+    set_vibration(vib)
 
 sound =  [
     [261, 523, 1], # C5 
@@ -311,7 +271,7 @@ try:
                     vib.hf_freq = playingNotes[note + 1][2]
                     vib.hf_en_tone = vib.hf_freq >= 0
 
-                set__vibration(vib)
+                set_vibration(vib)
             
             print(playingNotes)
 
